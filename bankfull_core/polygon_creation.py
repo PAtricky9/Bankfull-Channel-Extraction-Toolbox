@@ -120,3 +120,4 @@ def create_bankfull_polygon(
         "right_bank_line": output_right_bank_line,
         "bankfull_polygon_raw": output_polygon,
     }
+

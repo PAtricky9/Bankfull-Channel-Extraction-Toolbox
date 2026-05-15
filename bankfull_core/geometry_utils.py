@@ -236,3 +236,4 @@ def generate_cross_sections(
 
     add_message(f"Generated {xsec_id - 1} cross sections.")
     return output_fc
+

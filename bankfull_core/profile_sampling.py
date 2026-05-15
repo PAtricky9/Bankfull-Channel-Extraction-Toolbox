@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 
 from .io_utils import add_field, add_message, add_text_field, add_warning, delete_if_allowed
@@ -180,7 +181,7 @@ def sample_dem_profiles(
             for geom, xsec_id, station_id, reach_id, chainage in cross_cursor:
                 if not geom or geom.length <= 0:
                     continue
-                steps = max(1, int(round(geom.length / sample_spacing_m)))
+                steps = max(1, int(math.ceil(geom.length / sample_spacing_m)))
                 for point_order in range(steps + 1):
                     distance = min(point_order * sample_spacing_m, geom.length)
                     if point_order == steps:

@@ -2,7 +2,7 @@
 
 Bankfull Channel Extractor is an ArcGIS Pro Python toolbox for estimating bankfull channel extent and bankfull width from a stream centreline and a LiDAR DEM.
 
-The toolbox is designed as a step by step QA workflow. It creates intermediate station points, cross sections, DEM profile samples, thalweg points, hydraulic curve tables, bankfull candidates, selected bankfull width lines, bank lines, polygons, and QA reports so the user can inspect and tune parameters before accepting final outputs.
+The toolbox now provides a one-tool entry point for basic runs plus staged tools for step by step QA. It creates intermediate station points, cross sections, DEM profile samples, thalweg points, hydraulic curve tables, bankfull candidates, selected bankfull width lines, bank lines, polygons, and QA reports so the user can inspect and tune parameters before accepting final outputs.
 
 ## What This Tool Does
 
@@ -28,6 +28,10 @@ It produces:
 
 This is an initial implementation. It is intended for testing on short reaches first, not immediate production use over large river networks. You should manually inspect intermediate outputs, especially near bridges, culverts, levees, vegetation artefacts, adjacent drains, confluences, and tight bends.
 
+This toolbox has not yet been validated against surveyed bankfull indicators or field verified channel boundaries. Outputs should be treated as candidate bankfull extents until reviewed by a geomorphologist or experienced hydraulic or GIS analyst.
+
+Current testing status: syntax checks have been run outside ArcGIS Pro, but ArcGIS Pro runtime testing is still required. Do not treat the toolbox as validated until the `.pyt` has been opened in ArcGIS Pro and tested on a short reach.
+
 ## Installation In ArcGIS Pro
 
 1. Download or clone this repository.
@@ -43,13 +47,13 @@ examples/
 3. Open ArcGIS Pro.
 4. In the Catalog pane, browse to the repository folder.
 5. Right-click `Bankfull_Channel_Extractor.pyt` and choose **Add To Project**.
-6. Expand the toolbox. You should see tools numbered 01 to 10.
+6. Expand the toolbox. You should see `Run Full Bankfull Workflow` plus tools numbered 01 to 10.
 
 If ArcGIS Pro cannot load the toolbox, check that `bankfull_core/` is in the same folder as `Bankfull_Channel_Extractor.pyt`.
 
 ## Recommended First Test
 
-Start with a short stream reach, for example 500 m to 2 km, before running a long river system.
+Start with a short stream reach, for example 500 m to 2 km, before running a long river system. Use `Run Full Bankfull Workflow` for a first end-to-end smoke test, or use the staged tools when you want to inspect each intermediate output before continuing.
 
 Recommended starting parameters:
 
@@ -68,9 +72,50 @@ Recommended starting parameters:
 
 These values are only a starting point. Adjust them after visually inspecting station points, cross sections, profile samples, thalweg points, candidates, and QA flags.
 
+## Project Geodatabase And Run Name
+
+The run-based tools use a Project geodatabase plus a short Run name. `01 Prepare Inputs` creates the standard run outputs, and later tools find those outputs automatically instead of asking you to browse for each intermediate dataset.
+
+For a run named `bf01`, common output names include:
+
+- `bf01_stream`
+- `bf01_boundary`
+- `bf01_dem_clip` when DEM clipping is used
+- `bf01_run_params`
+- `bf01_stations`
+- `bf01_xsecs`
+- `bf01_profile_pts`
+- `bf01_profile_tbl`
+- `bf01_thalweg`
+- `bf01_hyd_curve`
+- `bf01_profile_metrics`
+- `bf01_cand_pts`
+- `bf01_cand_lines`
+- `bf01_cand_tbl`
+- `bf01_selected_pts`
+- `bf01_selected_lines`
+- `bf01_selected_tbl`
+- `bf01_qa_flags`
+- `bf01_left_bank`
+- `bf01_right_bank`
+- `bf01_polygon_raw`
+- `bf01_smoothed_pts`, `bf01_polygon_smooth`, and `bf01_correction_log` when smoothing is used
+
+DEM sampling uses the clipped DEM if `bf01_dem_clip` exists. If no DEM clip was created, it uses the DEM path recorded in `bf01_run_params`.
+
 ## Workflow
 
-Run the tools in order.
+There are two ways to run the toolbox.
+
+### Run Full Bankfull Workflow
+
+This is the main entry point for basic users. It starts from an input stream centreline and DEM, creates or uses the project geodatabase, writes the standard short output names, and can optionally create QA report files.
+
+Smoothing is not forced by default. If Smoothing method is `none`, the full workflow stops after the raw bankfull polygon unless QA report creation is enabled.
+
+### Staged Workflow
+
+Run the numbered tools in order when you want to inspect outputs and adjust parameters between stages.
 
 ### 01 Prepare Inputs
 
@@ -98,6 +143,8 @@ Inspect for:
 ### 04 Sample DEM Profiles
 
 Densifies each cross section and samples DEM elevation and optional slope.
+
+This tool uses `<run>_dem_clip` if it exists. If no DEM clip was created, it uses the DEM path recorded by `01 Prepare Inputs` in `<run>_run_params`.
 
 Inspect profile points for DEM coverage, NoData areas, bridges, road embankments, culverts, vegetation artefacts, and other features that can confuse bank detection.
 
@@ -146,7 +193,7 @@ Inspect the polygon carefully before using it. Raw polygons can be invalid in co
 
 Optionally smooths selected bank points with a transparent rolling median method and writes a correction log.
 
-Use smoothing cautiously. Do not over-smooth real river bends.
+Use smoothing cautiously. Do not over-smooth real river bends. The full workflow defaults to `none` and skips smoothed outputs unless you choose a smoothing method.
 
 ### 10 Generate QA Report
 
@@ -160,6 +207,8 @@ Creates CSV and Markdown summaries including:
 - Largest bankfull level jumps.
 - Parameters and input paths.
 - Known limitations.
+
+The staged QA report tool requires the Project geodatabase, Run name, and an output report folder. It reads `<run>_selected_tbl`, `<run>_qa_flags`, `<run>_cand_tbl`, and `<run>_run_params`.
 
 ## Key Concepts
 
@@ -219,9 +268,11 @@ Before accepting outputs:
 ## Documentation
 
 - Full user guide: `docs/README.md`
+- Tool help: `docs/tool_help.md`
 - Method notes: `docs/method_notes.md`
 - Example parameters: `examples/example_config.md`
 - Third party notice: `THIRD_PARTY_NOTICES.md`
+- Licence status: `LICENSE`
 
 ## Attribution
 

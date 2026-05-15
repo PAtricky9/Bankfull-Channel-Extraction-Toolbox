@@ -106,6 +106,9 @@ def connected_wetted_region(
     while right_idx < len(profile) - 1 and profile[right_idx + 1]["elev_m"] <= water_level:
         right_idx += 1
 
+    left_edge_wet = left_idx == 0
+    right_edge_wet = right_idx == len(profile) - 1
+
     if left_idx > 0:
         left_boundary = _interpolate_at_level(
             profile[left_idx - 1], profile[left_idx], water_level
@@ -161,6 +164,10 @@ def connected_wetted_region(
         "top_width_m": top_width,
         "flow_area_m2": area,
         "hydraulic_depth_m": area / top_width if top_width > 0 else None,
+        "left_edge_wet": int(left_edge_wet),
+        "right_edge_wet": int(right_edge_wet),
+        "section_too_short": 1 if left_edge_wet or right_edge_wet else 0,
+        "water_reaches_profile_edge": 1 if left_edge_wet or right_edge_wet else 0,
     }
 
 
@@ -199,6 +206,10 @@ def hydraulic_curve_for_profile(
                 "width_rate": None,
                 "area_rate": None,
                 "hyd_depth_rate": None,
+                "left_edge_wet": region["left_edge_wet"] if region else 0,
+                "right_edge_wet": region["right_edge_wet"] if region else 0,
+                "section_too_short": region["section_too_short"] if region else 0,
+                "water_reaches_profile_edge": region["water_reaches_profile_edge"] if region else 0,
                 "valid": 1 if valid else 0,
             }
         )
@@ -270,6 +281,10 @@ def _create_hydraulic_table(path: str, overwrite: bool) -> None:
     add_field(path, "width_rate", "DOUBLE")
     add_field(path, "area_rate", "DOUBLE")
     add_field(path, "hyd_rate", "DOUBLE")
+    add_field(path, "left_edge_wet", "SHORT")
+    add_field(path, "right_edge_wet", "SHORT")
+    add_field(path, "section_too_short", "SHORT")
+    add_field(path, "water_reaches_profile_edge", "SHORT")
     add_field(path, "valid", "SHORT")
 
 
@@ -296,11 +311,13 @@ def detect_thalweg_and_hydraulic_metrics(
     output_thalweg_points: str,
     output_hydraulic_curve_table: str,
     output_profile_metrics_table: str,
+    spatial_ref_source: str | None = None,
     overwrite: bool = True,
 ) -> dict[str, str]:
     """ArcPy wrapper for thalweg and hydraulic metrics."""
     arcpy = _arcpy()
-    spatial_ref = arcpy.env.outputCoordinateSystem
+    sr_source = spatial_ref_source or profile_table
+    spatial_ref = arcpy.Describe(sr_source).spatialReference
     _create_thalweg_points(output_thalweg_points, spatial_ref, overwrite)
     _create_hydraulic_table(output_hydraulic_curve_table, overwrite)
     _create_profile_metrics_table(output_profile_metrics_table, overwrite)
@@ -326,6 +343,10 @@ def detect_thalweg_and_hydraulic_metrics(
         "width_rate",
         "area_rate",
         "hyd_rate",
+        "left_edge_wet",
+        "right_edge_wet",
+        "section_too_short",
+        "water_reaches_profile_edge",
         "valid",
     ]
     metrics_fields = [
@@ -388,6 +409,10 @@ def detect_thalweg_and_hydraulic_metrics(
                                 curve_row["width_rate"],
                                 curve_row["area_rate"],
                                 curve_row["hyd_depth_rate"],
+                                curve_row["left_edge_wet"],
+                                curve_row["right_edge_wet"],
+                                curve_row["section_too_short"],
+                                curve_row["water_reaches_profile_edge"],
                                 curve_row["valid"],
                             )
                         )
