@@ -231,3 +231,7 @@ This implementation was inspired by the Cross-Sections and Dimensions Tool by Jo
 - https://doi.org/10.5281/zenodo.18950771
 
 The reference project is MIT licensed. No source code from that repository is included in this initial implementation. The current toolbox was written independently from the project specification, using the reference tool as methodological inspiration only.
+
+
+## Validation status
+This toolbox has not yet been validated against surveyed bankfull indicators or field verified channel boundaries. Outputs should be treated as candidate bankfull extents until reviewed by a geomorphologist or experienced hydraulic or GIS analyst.

@@ -120,6 +120,12 @@ def create_config_table(
     return table
 
 
+def clean_name(name: str) -> str:
+    return "".join(ch.lower() if ch.isalnum() else "_" for ch in str(name)).strip("_") or "bf01"
+
+def run_output_name(run_name: str, suffix: str) -> str:
+    return f"{clean_name(run_name)}_{suffix}"
+
 def prepare_inputs(
     stream_centerline: str,
     dem_raster: str,
@@ -129,6 +135,9 @@ def prepare_inputs(
     dissolve_stream: bool = True,
     check_projection: bool = True,
     overwrite: bool = True,
+    run_name: str = "bf01",
+    reach_mode: str = "Treat all input streams as one reach",
+    reach_field: str | None = None,
 ) -> dict[str, str | None]:
     """Prepare the stream, optional DEM clip, boundary, and config table."""
     arcpy = _arcpy()
@@ -148,7 +157,8 @@ def prepare_inputs(
             "distance-based parameters."
         )
 
-    prepared_stream = output_path(gdb, "prepared_stream_centerline")
+    run_id = clean_name(run_name)
+    prepared_stream = output_path(gdb, run_output_name(run_id, "stream"))
     delete_if_allowed(prepared_stream, overwrite=overwrite)
     if dissolve_stream:
         add_message("Dissolving stream centreline.")
@@ -157,7 +167,19 @@ def prepare_inputs(
         add_message("Copying stream centreline.")
         arcpy.management.CopyFeatures(stream_centerline, prepared_stream)
 
-    processing_boundary = output_path(gdb, "processing_boundary")
+    add_field(prepared_stream, "reach_id", "LONG")
+    source_oid = arcpy.Describe(prepared_stream).OIDFieldName
+    with arcpy.da.UpdateCursor(prepared_stream, [source_oid, "reach_id", reach_field] if reach_field else [source_oid, "reach_id"]) as cursor:
+        for row in cursor:
+            if reach_mode == "Treat all input streams as one reach":
+                row[1] = 1
+            elif reach_mode == "Use a selected reach ID field" and reach_field:
+                row[1] = int(row[2]) if row[2] not in (None, "") else int(row[0])
+            else:
+                row[1] = int(row[0])
+            cursor.updateRow(row)
+
+    processing_boundary = output_path(gdb, run_output_name(run_id, "boundary"))
     clipped_dem = None
     if dem_clip_buffer not in (None, "", 0, "0"):
         delete_if_allowed(processing_boundary, overwrite=overwrite)
@@ -168,7 +190,7 @@ def prepare_inputs(
             dem_clip_buffer,
             dissolve_option="ALL",
         )
-        clipped_dem = output_path(gdb, "dem_clipped")
+        clipped_dem = output_path(gdb, run_output_name(run_id, "dem_clip"))
         delete_if_allowed(clipped_dem, overwrite=overwrite)
         add_message("Clipping DEM to processing boundary.")
         try:
@@ -202,9 +224,12 @@ def prepare_inputs(
         ("check_projection", check_projection),
         ("stream_spatial_reference", stream_sr),
         ("dem_spatial_reference", dem_sr),
-        ("toolbox_version", "0.1.0"),
+        ("toolbox_version", "0.2.0"),
+        ("run_name", run_name),
+        ("reach_mode", reach_mode),
+        ("reach_field", reach_field or ""),
     ]
-    config_table = create_config_table(gdb, "project_config", config_rows, overwrite)
+    config_table = create_config_table(gdb, run_output_name(run_id, "run_params"), config_rows, overwrite)
 
     return {
         "output_gdb": gdb,
