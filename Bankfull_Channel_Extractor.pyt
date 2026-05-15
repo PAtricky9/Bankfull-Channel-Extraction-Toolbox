@@ -12,7 +12,7 @@ from bankfull_core.candidate_detection import detect_bankfull_candidates
 from bankfull_core.continuity_check import select_best_candidates
 from bankfull_core.geometry_utils import generate_cross_sections, generate_station_points
 from bankfull_core.hydraulic_metrics import detect_thalweg_and_hydraulic_metrics
-from bankfull_core.io_utils import output_path, prepare_inputs, run_output_name
+from bankfull_core.io_utils import output_path, prepare_inputs, run_output_name, log_stage_parameters
 from bankfull_core.polygon_creation import create_bankfull_polygon
 from bankfull_core.profile_sampling import sample_dem_profiles
 from bankfull_core.qa_report import generate_qa_report
@@ -29,9 +29,10 @@ def _txt(p):
 def _flt(p):
     t=_txt(p)
     return None if t is None else float(t)
-def _p(name,label,dt,direction="Input",ptype="Required",default=None):
+def _p(name,label,dt,direction="Input",ptype="Required",default=None,help_text=None):
     x=arcpy.Parameter(name=name,displayName=label,datatype=dt,direction=direction,parameterType=ptype)
     if default is not None: x.value=default
+    x.description = help_text or f"{label}. See docs/tool_help.md for details."
     return x
 
 def _auto(gdb,run,suffix): return output_path(gdb, run_output_name(run,suffix))
@@ -66,6 +67,7 @@ class SetupBankfullProject(object):
         _require_arcpy()
         out=prepare_inputs(parameters[0].valueAsText,parameters[1].valueAsText,parameters[2].valueAsText,parameters[3].valueAsText,_txt(parameters[7]),False,_bool(parameters[8]),run_name=parameters[4].valueAsText,reach_mode=parameters[5].valueAsText,reach_field=_txt(parameters[6]))
         parameters[9].value=out["output_gdb"]
+        log_stage_parameters(out["output_gdb"], parameters[4].valueAsText, "01 Setup Bankfull Project", {"stream":parameters[0].valueAsText,"dem":parameters[1].valueAsText,"reach_mode":parameters[5].valueAsText}, out)
 
 class CreateCrossSectionsAndDEMProfiles(object):
     def __init__(self): self.label="02 Create Cross Sections And DEM Profiles"; self.description="Create station points, cross sections, and sampled DEM profiles from project inputs."
@@ -81,7 +83,8 @@ class CreateCrossSectionsAndDEMProfiles(object):
         stations=_auto(gdb,run,"stations"); xsecs=_auto(gdb,run,"xsecs")
         generate_station_points(stream,float(p[2].value),"reach_id",stations)
         generate_cross_sections(stations,stream,float(p[3].value),"fast_perpendicular",float(p[4].value),xsecs)
-        sample_dem_profiles(xsecs,dem,float(p[5].value),_txt(p[6]),_bool(p[7]),_auto(gdb,run,"profile_pts"),_auto(gdb,run,"profile_tbl"))
+        out=sample_dem_profiles(xsecs,dem,float(p[5].value),_txt(p[6]),_bool(p[7]),_auto(gdb,run,"profile_pts"),_auto(gdb,run,"profile_tbl"))
+        log_stage_parameters(gdb, run, "02 Create Cross Sections And DEM Profiles", {"station_interval":p[2].value,"half_width":p[3].value,"sample_spacing":p[5].value}, {"stations":stations,"xsecs":xsecs,**out})
 
 class CalculateHydraulicMetrics(object):
     def __init__(self): self.label="03 Calculate Hydraulic Metrics"; self.description="Detect thalweg and compute hydraulic metrics from sampled profile table."
@@ -89,7 +92,8 @@ class CalculateHydraulicMetrics(object):
         _require_arcpy(); return [_p("gdb","Project geodatabase","DEWorkspace"),_p("run","Run name","GPString",default="bf01"),_p("search","Thalweg search distance","GPDouble",default=10.0),_p("max_h","Maximum bankfull search height","GPDouble",default=5.0),_p("step","Water level step","GPDouble",default=0.1),_p("min_w","Minimum valid top width","GPDouble",default=0.5)]
     def execute(self,p,m):
         gdb,run=p[0].valueAsText,p[1].valueAsText
-        detect_thalweg_and_hydraulic_metrics(_auto(gdb,run,"profile_tbl"),float(p[2].value),float(p[3].value),float(p[4].value),float(p[5].value),_auto(gdb,run,"thalweg"),_auto(gdb,run,"hyd_curve"),_auto(gdb,run,"profile_metrics"))
+        out=detect_thalweg_and_hydraulic_metrics(_auto(gdb,run,"profile_tbl"),float(p[2].value),float(p[3].value),float(p[4].value),float(p[5].value),_auto(gdb,run,"thalweg"),_auto(gdb,run,"hyd_curve"),_auto(gdb,run,"profile_metrics"),spatial_ref_source=_auto(gdb,run,"xsecs"))
+        log_stage_parameters(gdb, run, "03 Calculate Hydraulic Metrics", {"search":p[2].value,"max_h":p[3].value,"step":p[4].value}, out)
 
 class DetectAndSelectBankfull(object):
     def __init__(self): self.label="04 Detect And Select Bankfull"; self.description="Detect candidate bankfull lines and select final outputs with continuity QA."
@@ -97,8 +101,9 @@ class DetectAndSelectBankfull(object):
         _require_arcpy(); return [_p("gdb","Project geodatabase","DEWorkspace"),_p("run","Run name","GPString",default="bf01"),_p("slope","Slope threshold","GPDouble",default=15.0),_p("sens","Hydraulic breakpoint sensitivity","GPDouble",default=1.0),_p("max_h","Maximum bankfull height above thalweg","GPDouble",ptype="Optional"),_p("wjump","Width jump threshold","GPDouble",default=0.75),_p("ejump","Bankfull level jump threshold","GPDouble",default=1.0),_p("window","Moving window size","GPLong",default=5)]
     def execute(self,p,m):
         gdb,run=p[0].valueAsText,p[1].valueAsText
-        detect_bankfull_candidates(_auto(gdb,run,"profile_tbl"),_auto(gdb,run,"hyd_curve"),_auto(gdb,run,"thalweg"),float(p[2].value),float(p[3].value),_flt(p[4]),_auto(gdb,run,"cand_pts"),_auto(gdb,run,"cand_lines"),_auto(gdb,run,"cand_tbl"))
-        select_best_candidates(_auto(gdb,run,"cand_tbl"),_auto(gdb,run,"cand_pts"),_auto(gdb,run,"cand_lines"),float(p[5].value),float(p[6].value),int(p[7].value),_auto(gdb,run,"selected_pts"),_auto(gdb,run,"selected_lines"),_auto(gdb,run,"selected_tbl"),_auto(gdb,run,"qa_flags"))
+        out1=detect_bankfull_candidates(_auto(gdb,run,"profile_tbl"),_auto(gdb,run,"hyd_curve"),_auto(gdb,run,"thalweg"),float(p[2].value),float(p[3].value),_flt(p[4]),_auto(gdb,run,"cand_pts"),_auto(gdb,run,"cand_lines"),_auto(gdb,run,"cand_tbl"))
+        out2=select_best_candidates(_auto(gdb,run,"cand_tbl"),_auto(gdb,run,"cand_pts"),_auto(gdb,run,"cand_lines"),float(p[5].value),float(p[6].value),int(p[7].value),_auto(gdb,run,"selected_pts"),_auto(gdb,run,"selected_lines"),_auto(gdb,run,"selected_tbl"),_auto(gdb,run,"qa_flags"))
+        log_stage_parameters(gdb, run, "04 Detect And Select Bankfull", {"slope":p[2].value,"sensitivity":p[3].value}, {**out1,**out2})
 
 class CreateBankfullOutputsAndQAReport(object):
     def __init__(self): self.label="05 Create Bankfull Outputs And QA Report"; self.description="Create bankfull polygon outputs and optional QA report."
@@ -106,9 +111,10 @@ class CreateBankfullOutputsAndQAReport(object):
         _require_arcpy(); return [_p("gdb","Project geodatabase","DEWorkspace"),_p("run","Run name","GPString",default="bf01"),_p("smooth","Smoothing method","GPString",default="none"),_p("smooth_win","Smoothing window","GPLong",default=5),_p("preserve","Preserve low confidence points","GPBoolean",default=True),_p("qa","Create QA report","GPBoolean",default=True),_p("report","Output report folder","DEFolder",ptype="Optional")]
     def execute(self,p,m):
         gdb,run=p[0].valueAsText,p[1].valueAsText
-        create_bankfull_polygon(_auto(gdb,run,"selected_pts"),_auto(gdb,run,"selected_lines"),_auto(gdb,run,"stream"),_auto(gdb,run,"selected_tbl"),_auto(gdb,run,"polygon_raw"),_auto(gdb,run,"left_bank"),_auto(gdb,run,"right_bank"))
-        smooth_bank_lines(_auto(gdb,run,"selected_pts"),_auto(gdb,run,"selected_tbl"),p[2].valueAsText,int(p[3].value),_bool(p[4]),_auto(gdb,run,"selected_pts")+"_sm",_auto(gdb,run,"polygon_smooth"),_auto(gdb,run,"correction_log"))
+        out1=create_bankfull_polygon(_auto(gdb,run,"selected_pts"),_auto(gdb,run,"selected_lines"),_auto(gdb,run,"stream"),_auto(gdb,run,"selected_tbl"),_auto(gdb,run,"polygon_raw"),_auto(gdb,run,"left_bank"),_auto(gdb,run,"right_bank"))
+        out2=smooth_bank_lines(_auto(gdb,run,"selected_pts"),_auto(gdb,run,"selected_tbl"),p[2].valueAsText,int(p[3].value),_bool(p[4]),_auto(gdb,run,"selected_pts")+"_sm",_auto(gdb,run,"polygon_smooth"),_auto(gdb,run,"correction_log"))
         if _bool(p[5]) and _txt(p[6]): generate_qa_report(_auto(gdb,run,"selected_tbl"),_auto(gdb,run,"qa_flags"),_auto(gdb,run,"cand_tbl"),_auto(gdb,run,"run_params"),p[6].valueAsText)
+        log_stage_parameters(gdb, run, "05 Create Bankfull Outputs And QA Report", {"smoothing":p[2].valueAsText,"qa":_bool(p[5])}, {**out1,**out2})
 
 class RunFullBankfullWorkflow(object):
     def __init__(self): self.label="Run Full Bankfull Workflow"; self.description="Run setup, cross sections, hydraulics, candidate selection, and final outputs in one tool."

@@ -55,6 +55,8 @@ def _base_score(candidate: dict) -> float:
         score += 0.12
     if candidate.get("cand_flag") not in (None, "", "ok"):
         score -= 0.12
+    if int(candidate.get("water_reaches_profile_edge") or 0) == 1:
+        score -= 0.2
     if candidate.get("left_x") is None or candidate.get("right_x") is None:
         score -= 0.3
     return max(0.0, min(1.0, score))
@@ -162,10 +164,8 @@ def select_best_candidates(
 
     selected = []
     for xsec_id, rows in by_xsec.items():
-        best = max(rows, key=_base_score)
-        row = dict(best)
-        row["score"] = _base_score(best)
-        selected.append(row)
+        for r in rows: r["score"] = _base_score(r)
+        selected.extend(rows)
 
     by_reach: dict[str, list[dict]] = defaultdict(list)
     for row in selected:
@@ -209,6 +209,9 @@ def select_best_candidates(
                 reasons.append(f"level jump {level_jump:.2f} m exceeds threshold {elevation_jump_threshold_m:g} m")
             if row.get("cand_flag") not in (None, "", "ok"):
                 flags.append(str(row.get("cand_flag")))
+            if int(row.get("water_reaches_profile_edge") or 0) == 1:
+                flags.append("water_reaches_profile_edge")
+                reasons.append("water level reached profile edge")
                 reasons.append(str(row.get("reason") or row.get("cand_flag")))
             if row.get("left_x") is None or row.get("right_x") is None:
                 score -= 0.3
@@ -219,6 +222,7 @@ def select_best_candidates(
             confidence = _confidence_label(score)
             review_req = "Yes" if confidence == "Low" or flags else "No"
             final = {
+                "_score": score,
                 "xsec_id": row["xsec_id"],
                 "reach_id": reach_id,
                 "chain_m": row["chain_m"],
@@ -240,6 +244,15 @@ def select_best_candidates(
                 "right_z": row["right_z"],
             }
             final_rows.append(final)
+
+
+    # choose best per cross section only after continuity/QA penalties
+    best_by_xsec = {}
+    for row in final_rows:
+        xid = int(row["xsec_id"])
+        if xid not in best_by_xsec or row.get("_score",0) > best_by_xsec[xid].get("_score",0):
+            best_by_xsec[xid] = row
+    final_rows = list(best_by_xsec.values())
 
     _create_selected_table(output_selected_table, overwrite)
     _create_selected_points(output_selected_points, spatial_ref, overwrite)

@@ -102,14 +102,19 @@ def create_bankfull_polygon(
 
                     ring_points = left_points + list(reversed(right_points)) + [left_points[0]]
                     polygon = arcpy.Polygon(arcpy.Array(ring_points), spatial_ref)
+                    flags=[]; reasons=[]
                     qa_flag = "ok"
                     qa_reason = "raw polygon created"
                     if polygon.isMultipart:
-                        qa_flag = "multipart"
-                        qa_reason = "polygon is multipart after construction; inspect geometry"
+                        flags.append("multipart"); reasons.append("polygon is multipart")
                     if polygon.area <= 0:
-                        qa_flag = "zero_area"
-                        qa_reason = "polygon has zero or negative area; inspect bank ordering"
+                        flags.append("zero_area"); reasons.append("polygon has zero/negative area")
+                    if not polygon.isSimple:
+                        flags.append("self_intersection"); reasons.append("polygon is not simple")
+                    if left_line.crosses(right_line):
+                        flags.append("bank_crossing"); reasons.append("left/right bank lines cross")
+                    if flags:
+                        qa_flag = ";".join(flags); qa_reason = "; ".join(reasons)
                     polygon_cursor.insertRow(
                         (polygon, reach_id, len(valid_rows), qa_flag, qa_reason)
                     )

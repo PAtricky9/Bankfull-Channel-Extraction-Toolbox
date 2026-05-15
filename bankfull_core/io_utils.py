@@ -238,3 +238,23 @@ def prepare_inputs(
         "processing_boundary": processing_boundary,
         "project_config": config_table,
     }
+
+
+def log_stage_parameters(workspace: str, run_name: str, tool_name: str, params: dict, output_paths: dict | None = None, toolbox_version: str = "0.2.0") -> str:
+    table = output_path(workspace, run_output_name(run_name, "run_params"))
+    arcpy = _arcpy()
+    if not arcpy.Exists(table):
+        arcpy.management.CreateTable(workspace, run_output_name(run_name, "run_params"))
+        add_text_field(table, "tool_name", 128); add_text_field(table, "run_name", 128)
+        add_text_field(table, "param_name", 128); add_text_field(table, "param_value", 2048)
+        add_text_field(table, "input_path", 2048); add_text_field(table, "output_path", 2048)
+        add_text_field(table, "recorded_utc", 64); add_text_field(table, "toolbox_version", 32)
+    now = _dt.datetime.utcnow().replace(microsecond=0).isoformat()+"Z"
+    with arcpy.da.InsertCursor(table,["tool_name","run_name","param_name","param_value","input_path","output_path","recorded_utc","toolbox_version"]) as cur:
+        for k,v in params.items():
+            is_path = isinstance(v, str) and (("\\" in v) or ("/" in v))
+            cur.insertRow((tool_name, str(run_name), str(k), str(v), str(v) if is_path else "", "", now, toolbox_version))
+        if output_paths:
+            for k,v in output_paths.items():
+                cur.insertRow((tool_name, str(run_name), f"output::{k}", str(v), "", str(v), now, toolbox_version))
+    return table

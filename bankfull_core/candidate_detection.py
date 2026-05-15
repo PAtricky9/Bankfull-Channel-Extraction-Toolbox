@@ -46,6 +46,10 @@ CURVE_FIELDS = [
     "width_rate",
     "area_rate",
     "hyd_rate",
+    "left_edge_wet",
+    "right_edge_wet",
+    "section_too_short",
+    "water_reaches_profile_edge",
     "valid",
 ]
 
@@ -65,6 +69,11 @@ CANDIDATE_FIELDS = [
     "conf_raw",
     "reason",
     "cand_flag",
+    "left_edge_wet",
+    "right_edge_wet",
+    "water_reaches_profile_edge",
+    "width_reason",
+    "height_above_thalweg",
 ]
 
 
@@ -153,6 +162,11 @@ def _candidate_from_bank_points(
         "conf_raw": max(0.0, min(1.0, confidence)),
         "reason": reason,
         "cand_flag": flag,
+        "left_edge_wet": 0,
+        "right_edge_wet": 0,
+        "water_reaches_profile_edge": 0,
+        "width_reason": "ok",
+        "height_above_thalweg": None,
     }
 
 
@@ -198,7 +212,7 @@ def slope_threshold_candidate(
         reason = "used strongest slope peaks because threshold was not met on both banks"
 
     xsec_id = int(profile[0]["xsec_id"])
-    return _candidate_from_bank_points(
+    cand = _candidate_from_bank_points(
         xsec_id,
         profile[0].get("reach_id"),
         profile[0].get("chain_m"),
@@ -252,18 +266,23 @@ def hydraulic_breakpoint_candidate(
     if not region:
         return None
 
+    left_edge_wet = int(best.get("left_edge_wet") or 0)
+    right_edge_wet = int(best.get("right_edge_wet") or 0)
+    water_edge = int(best.get("water_reaches_profile_edge") or 0)
     flag = "ok" if score >= sensitivity else "weak_breakpoint"
+    if water_edge:
+        flag = "water_reaches_profile_edge"
     confidence = 0.72 if score >= sensitivity else 0.42
     reason = (
-        f"largest hydraulic width-rate breakpoint, score={score:.2f}, "
-        f"sensitivity={sensitivity:g}"
+        f"hydraulic score={score:.2f}; width_rate={float(best.get("width_rate") or 0.0):.3f}; "
+        f"area_rate={float(best.get("area_rate") or 0.0):.3f}; hyd_rate={float(best.get("hyd_rate") or 0.0):.3f}"
     )
     xsec_id = int(profile[0]["xsec_id"])
     left = dict(region["left"])
     left["z"] = water_level
     right = dict(region["right"])
     right["z"] = water_level
-    return _candidate_from_bank_points(
+    cand = _candidate_from_bank_points(
         xsec_id,
         profile[0].get("reach_id"),
         profile[0].get("chain_m"),
@@ -331,6 +350,11 @@ def _create_candidate_table(path: str, overwrite: bool) -> None:
     add_field(path, "conf_raw", "DOUBLE")
     add_text_field(path, "reason", 512)
     add_text_field(path, "cand_flag", 128)
+    add_field(path, "left_edge_wet", "SHORT")
+    add_field(path, "right_edge_wet", "SHORT")
+    add_field(path, "water_reaches_profile_edge", "SHORT")
+    add_text_field(path, "width_reason", 64)
+    add_field(path, "height_above_thalweg", "DOUBLE")
 
 
 def _create_candidate_points(path: str, spatial_ref, overwrite: bool) -> None:
@@ -348,6 +372,11 @@ def _create_candidate_points(path: str, spatial_ref, overwrite: bool) -> None:
     add_field(path, "bf_width", "DOUBLE")
     add_field(path, "conf_raw", "DOUBLE")
     add_text_field(path, "cand_flag", 128)
+    add_field(path, "left_edge_wet", "SHORT")
+    add_field(path, "right_edge_wet", "SHORT")
+    add_field(path, "water_reaches_profile_edge", "SHORT")
+    add_text_field(path, "width_reason", 64)
+    add_field(path, "height_above_thalweg", "DOUBLE")
 
 
 def _create_candidate_lines(path: str, spatial_ref, overwrite: bool) -> None:
@@ -363,6 +392,11 @@ def _create_candidate_lines(path: str, spatial_ref, overwrite: bool) -> None:
     add_field(path, "bf_width", "DOUBLE")
     add_field(path, "conf_raw", "DOUBLE")
     add_text_field(path, "cand_flag", 128)
+    add_field(path, "left_edge_wet", "SHORT")
+    add_field(path, "right_edge_wet", "SHORT")
+    add_field(path, "water_reaches_profile_edge", "SHORT")
+    add_text_field(path, "width_reason", 64)
+    add_field(path, "height_above_thalweg", "DOUBLE")
 
 
 def detect_bankfull_candidates(

@@ -310,11 +310,13 @@ def detect_thalweg_and_hydraulic_metrics(
     output_thalweg_points: str,
     output_hydraulic_curve_table: str,
     output_profile_metrics_table: str,
+    spatial_ref_source: str | None = None,
     overwrite: bool = True,
 ) -> dict[str, str]:
     """ArcPy wrapper for thalweg and hydraulic metrics."""
     arcpy = _arcpy()
-    spatial_ref = arcpy.Describe(profile_table).spatialReference
+    sr_source = spatial_ref_source or profile_table
+    spatial_ref = arcpy.Describe(sr_source).spatialReference
     _create_thalweg_points(output_thalweg_points, spatial_ref, overwrite)
     _create_hydraulic_table(output_hydraulic_curve_table, overwrite)
     _create_profile_metrics_table(output_profile_metrics_table, overwrite)
