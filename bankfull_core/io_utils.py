@@ -228,6 +228,7 @@ def prepare_inputs(
         ("run_name", run_name),
         ("reach_mode", reach_mode),
         ("reach_field", reach_field or ""),
+        ("dem_for_processing", clipped_dem or dem_raster),
     ]
     config_table = create_config_table(gdb, run_output_name(run_id, "run_params"), config_rows, overwrite)
 
@@ -258,3 +259,19 @@ def log_stage_parameters(workspace: str, run_name: str, tool_name: str, params: 
             for k,v in output_paths.items():
                 cur.insertRow((tool_name, str(run_name), f"output::{k}", str(v), "", str(v), now, toolbox_version))
     return table
+
+
+def read_run_param(workspace: str, run_name: str, param_name: str) -> str | None:
+    arcpy = _arcpy()
+    table = output_path(workspace, run_output_name(run_name, "run_params"))
+    if not arcpy.Exists(table):
+        return None
+    fields = [f.name for f in arcpy.ListFields(table)]
+    if "param_name" not in fields or "param_value" not in fields:
+        return None
+    value = None
+    with arcpy.da.SearchCursor(table, ["param_name", "param_value"]) as cur:
+        for name, val in cur:
+            if name == param_name:
+                value = val
+    return value

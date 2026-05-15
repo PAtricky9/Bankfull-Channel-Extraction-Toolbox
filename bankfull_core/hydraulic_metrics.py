@@ -342,6 +342,10 @@ def detect_thalweg_and_hydraulic_metrics(
         "width_rate",
         "area_rate",
         "hyd_rate",
+        "left_edge_wet",
+        "right_edge_wet",
+        "section_too_short",
+        "water_reaches_profile_edge",
         "valid",
     ]
     metrics_fields = [
@@ -404,6 +408,10 @@ def detect_thalweg_and_hydraulic_metrics(
                                 curve_row["width_rate"],
                                 curve_row["area_rate"],
                                 curve_row["hyd_depth_rate"],
+                                curve_row["left_edge_wet"],
+                                curve_row["right_edge_wet"],
+                                curve_row["section_too_short"],
+                                curve_row["water_reaches_profile_edge"],
                                 curve_row["valid"],
                             )
                         )
