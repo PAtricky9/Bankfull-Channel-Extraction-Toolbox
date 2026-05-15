@@ -497,76 +497,99 @@ def detect_bankfull_candidates(
     ]
 
     total = 0
-    with arcpy.da.InsertCursor(output_candidate_table, table_insert_fields) as table_cursor:
-        with arcpy.da.InsertCursor(output_candidate_points, point_fields) as point_cursor:
-            with arcpy.da.InsertCursor(output_candidate_width_lines, line_fields) as line_cursor:
-                for xsec_id, profile_rows in sorted(profiles.items()):
-                    thalweg = thalwegs.get(xsec_id)
-                    slope = slope_threshold_candidate(
-                        profile_rows,
-                        thalweg,
-                        slope_threshold_deg,
-                        max_bankfull_height_m,
+    batch_size = 500
+    candidate_table_rows = []
+    candidate_point_rows = []
+    candidate_line_rows = []
+
+    def flush_candidate_rows() -> None:
+        if candidate_table_rows:
+            with arcpy.da.InsertCursor(output_candidate_table, table_insert_fields) as cursor:
+                for row in candidate_table_rows:
+                    cursor.insertRow(row)
+        if candidate_point_rows:
+            with arcpy.da.InsertCursor(output_candidate_points, point_fields) as cursor:
+                for row in candidate_point_rows:
+                    cursor.insertRow(row)
+        if candidate_line_rows:
+            with arcpy.da.InsertCursor(output_candidate_width_lines, line_fields) as cursor:
+                for row in candidate_line_rows:
+                    cursor.insertRow(row)
+        candidate_table_rows.clear()
+        candidate_point_rows.clear()
+        candidate_line_rows.clear()
+
+    for processed_count, (xsec_id, profile_rows) in enumerate(sorted(profiles.items()), start=1):
+        thalweg = thalwegs.get(xsec_id)
+        slope = slope_threshold_candidate(
+            profile_rows,
+            thalweg,
+            slope_threshold_deg,
+            max_bankfull_height_m,
+        )
+        hydraulic = hydraulic_breakpoint_candidate(
+            profile_rows,
+            curves.get(xsec_id, []),
+            thalweg,
+            hydraulic_sensitivity,
+            max_bankfull_height_m,
+        )
+        candidates = [
+            cand
+            for cand in (slope, hydraulic, agreement_candidate(slope, hydraulic))
+            if cand is not None
+        ]
+        for candidate in candidates:
+            candidate_table_rows.append(tuple(candidate[field] for field in table_insert_fields))
+            left_pt = arcpy.Point(candidate["left_x"], candidate["left_y"])
+            right_pt = arcpy.Point(candidate["right_x"], candidate["right_y"])
+            for side, pt, bank_z in (
+                ("left", left_pt, candidate["left_z"]),
+                ("right", right_pt, candidate["right_z"]),
+            ):
+                candidate_point_rows.append(
+                    (
+                        arcpy.PointGeometry(pt, spatial_ref),
+                        candidate["xsec_id"],
+                        candidate["reach_id"],
+                        candidate["chain_m"],
+                        candidate["method"],
+                        side,
+                        candidate["bf_level"],
+                        bank_z,
+                        candidate["bf_width"],
+                        candidate["conf_raw"],
+                        candidate["cand_flag"],
+                        candidate["left_edge_wet"],
+                        candidate["right_edge_wet"],
+                        candidate["water_reaches_profile_edge"],
+                        candidate["width_reason"],
+                        candidate["height_above_thalweg"],
                     )
-                    hydraulic = hydraulic_breakpoint_candidate(
-                        profile_rows,
-                        curves.get(xsec_id, []),
-                        thalweg,
-                        hydraulic_sensitivity,
-                        max_bankfull_height_m,
-                    )
-                    candidates = [
-                        cand
-                        for cand in (slope, hydraulic, agreement_candidate(slope, hydraulic))
-                        if cand is not None
-                    ]
-                    for candidate in candidates:
-                        table_cursor.insertRow(tuple(candidate[field] for field in table_insert_fields))
-                        left_pt = arcpy.Point(candidate["left_x"], candidate["left_y"])
-                        right_pt = arcpy.Point(candidate["right_x"], candidate["right_y"])
-                        for side, pt, bank_z in (
-                            ("left", left_pt, candidate["left_z"]),
-                            ("right", right_pt, candidate["right_z"]),
-                        ):
-                            point_cursor.insertRow(
-                                (
-                                    arcpy.PointGeometry(pt, spatial_ref),
-                                    candidate["xsec_id"],
-                                    candidate["reach_id"],
-                                    candidate["chain_m"],
-                                    candidate["method"],
-                                    side,
-                                    candidate["bf_level"],
-                                    bank_z,
-                                    candidate["bf_width"],
-                                    candidate["conf_raw"],
-                                    candidate["cand_flag"],
-                                    candidate["left_edge_wet"],
-                                    candidate["right_edge_wet"],
-                                    candidate["water_reaches_profile_edge"],
-                                    candidate["width_reason"],
-                                    candidate["height_above_thalweg"],
-                                )
-                            )
-                        line_cursor.insertRow(
-                            (
-                                arcpy.Polyline(arcpy.Array([left_pt, right_pt]), spatial_ref),
-                                candidate["xsec_id"],
-                                candidate["reach_id"],
-                                candidate["chain_m"],
-                                candidate["method"],
-                                candidate["bf_level"],
-                                candidate["bf_width"],
-                                candidate["conf_raw"],
-                                candidate["cand_flag"],
-                                candidate["left_edge_wet"],
-                                candidate["right_edge_wet"],
-                                candidate["water_reaches_profile_edge"],
-                                candidate["width_reason"],
-                                candidate["height_above_thalweg"],
-                            )
-                        )
-                        total += 1
+                )
+            candidate_line_rows.append(
+                (
+                    arcpy.Polyline(arcpy.Array([left_pt, right_pt]), spatial_ref),
+                    candidate["xsec_id"],
+                    candidate["reach_id"],
+                    candidate["chain_m"],
+                    candidate["method"],
+                    candidate["bf_level"],
+                    candidate["bf_width"],
+                    candidate["conf_raw"],
+                    candidate["cand_flag"],
+                    candidate["left_edge_wet"],
+                    candidate["right_edge_wet"],
+                    candidate["water_reaches_profile_edge"],
+                    candidate["width_reason"],
+                    candidate["height_above_thalweg"],
+                )
+            )
+            total += 1
+        if processed_count % batch_size == 0:
+            flush_candidate_rows()
+
+    flush_candidate_rows()
 
     add_message(f"Generated {total} bankfull candidates.")
     return {

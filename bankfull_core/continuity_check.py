@@ -258,87 +258,98 @@ def select_best_candidates(
     _create_selected_lines(output_selected_width_lines, spatial_ref, overwrite)
     _create_qa_table(output_qa_flags, overwrite)
 
-    with arcpy.da.InsertCursor(output_selected_table, SELECTED_FIELDS) as table_cursor:
-        with arcpy.da.InsertCursor(
-            output_selected_points,
-            [
-                "SHAPE@",
-                "xsec_id",
-                "reach_id",
-                "chain_m",
-                "side",
-                "sel_method",
-                "bf_level",
-                "bank_z",
-                "bf_width",
-                "confidence",
-                "review_req",
-            ],
-        ) as point_cursor:
-            with arcpy.da.InsertCursor(
-                output_selected_width_lines,
-                [
-                    "SHAPE@",
-                    "xsec_id",
-                    "reach_id",
-                    "chain_m",
-                    "sel_method",
-                    "bf_level",
-                    "bf_width",
-                    "confidence",
-                    "review_req",
-                ],
-            ) as line_cursor:
-                with arcpy.da.InsertCursor(
-                    output_qa_flags,
-                    ["xsec_id", "reach_id", "chain_m", "qa_flag", "qa_reason", "review_req"],
-                ) as qa_cursor:
-                    for row in sorted(final_rows, key=lambda item: (item["reach_id"], item["chain_m"] or 0)):
-                        table_cursor.insertRow(tuple(row[field] for field in SELECTED_FIELDS))
-                        left_point = arcpy.Point(row["left_x"], row["left_y"])
-                        right_point = arcpy.Point(row["right_x"], row["right_y"])
-                        for side, point, bank_z in (
-                            ("left", left_point, row["left_z"]),
-                            ("right", right_point, row["right_z"]),
-                        ):
-                            point_cursor.insertRow(
-                                (
-                                    arcpy.PointGeometry(point, spatial_ref),
-                                    row["xsec_id"],
-                                    row["reach_id"],
-                                    row["chain_m"],
-                                    side,
-                                    row["sel_method"],
-                                    row["bf_level"],
-                                    bank_z,
-                                    row["bf_width"],
-                                    row["confidence"],
-                                    row["review_req"],
-                                )
-                            )
-                        line_cursor.insertRow(
-                            (
-                                arcpy.Polyline(arcpy.Array([left_point, right_point]), spatial_ref),
-                                row["xsec_id"],
-                                row["reach_id"],
-                                row["chain_m"],
-                                row["sel_method"],
-                                row["bf_level"],
-                                row["bf_width"],
-                                row["confidence"],
-                                row["review_req"],
-                            )
-                        )
-                        qa_cursor.insertRow(
-                            (
-                                row["xsec_id"],
-                                row["reach_id"],
-                                row["chain_m"],
-                                row["qa_flag"],
-                                row["qa_reason"],
-                                row["review_req"],
-                            )
-                        )
+    point_fields = [
+        "SHAPE@",
+        "xsec_id",
+        "reach_id",
+        "chain_m",
+        "side",
+        "sel_method",
+        "bf_level",
+        "bank_z",
+        "bf_width",
+        "confidence",
+        "review_req",
+    ]
+    line_fields = [
+        "SHAPE@",
+        "xsec_id",
+        "reach_id",
+        "chain_m",
+        "sel_method",
+        "bf_level",
+        "bf_width",
+        "confidence",
+        "review_req",
+    ]
+    qa_fields = ["xsec_id", "reach_id", "chain_m", "qa_flag", "qa_reason", "review_req"]
+    selected_table_rows = []
+    selected_point_rows = []
+    selected_line_rows = []
+    qa_rows = []
+
+    for row in sorted(final_rows, key=lambda item: (item["reach_id"], item["chain_m"] or 0)):
+        selected_table_rows.append(tuple(row[field] for field in SELECTED_FIELDS))
+        left_point = arcpy.Point(row["left_x"], row["left_y"])
+        right_point = arcpy.Point(row["right_x"], row["right_y"])
+        for side, point, bank_z in (
+            ("left", left_point, row["left_z"]),
+            ("right", right_point, row["right_z"]),
+        ):
+            selected_point_rows.append(
+                (
+                    arcpy.PointGeometry(point, spatial_ref),
+                    row["xsec_id"],
+                    row["reach_id"],
+                    row["chain_m"],
+                    side,
+                    row["sel_method"],
+                    row["bf_level"],
+                    bank_z,
+                    row["bf_width"],
+                    row["confidence"],
+                    row["review_req"],
+                )
+            )
+        selected_line_rows.append(
+            (
+                arcpy.Polyline(arcpy.Array([left_point, right_point]), spatial_ref),
+                row["xsec_id"],
+                row["reach_id"],
+                row["chain_m"],
+                row["sel_method"],
+                row["bf_level"],
+                row["bf_width"],
+                row["confidence"],
+                row["review_req"],
+            )
+        )
+        qa_rows.append(
+            (
+                row["xsec_id"],
+                row["reach_id"],
+                row["chain_m"],
+                row["qa_flag"],
+                row["qa_reason"],
+                row["review_req"],
+            )
+        )
+
+    with arcpy.da.InsertCursor(output_selected_table, SELECTED_FIELDS) as cursor:
+        for row in selected_table_rows:
+            cursor.insertRow(row)
+
+    with arcpy.da.InsertCursor(output_selected_points, point_fields) as cursor:
+        for row in selected_point_rows:
+            cursor.insertRow(row)
+
+    with arcpy.da.InsertCursor(output_selected_width_lines, line_fields) as cursor:
+        for row in selected_line_rows:
+            cursor.insertRow(row)
+
+    with arcpy.da.InsertCursor(output_qa_flags, qa_fields) as cursor:
+        for row in qa_rows:
+            cursor.insertRow(row)
 
     add_message(f"Selected final bankfull candidates for {len(final_rows)} cross sections.")
     return {
