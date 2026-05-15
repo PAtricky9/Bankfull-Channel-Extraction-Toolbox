@@ -359,76 +359,93 @@ def detect_thalweg_and_hydraulic_metrics(
         "qa_flag",
     ]
 
-    with arcpy.da.InsertCursor(output_thalweg_points, thalweg_fields) as thal_cursor:
-        with arcpy.da.InsertCursor(output_hydraulic_curve_table, curve_fields) as curve_cursor:
-            with arcpy.da.InsertCursor(output_profile_metrics_table, metrics_fields) as metric_cursor:
-                for xsec_id, rows in sorted(grouped.items()):
-                    clean = clean_profile_rows(rows)
-                    nodata_count = len(rows) - len(clean)
-                    if len(clean) < 3:
-                        metric_cursor.insertRow((xsec_id, len(clean), nodata_count, None, None, None, "too_few_points"))
-                        continue
-                    thalweg = detect_thalweg(clean, centre_search_m)
-                    if not thalweg:
-                        metric_cursor.insertRow((xsec_id, len(clean), nodata_count, None, None, None, "no_thalweg"))
-                        continue
+    thalweg_insert_rows = []
+    curve_insert_rows = []
+    metric_insert_rows = []
 
-                    point = arcpy.PointGeometry(
-                        arcpy.Point(thalweg.get("x"), thalweg.get("y")), spatial_ref
-                    )
-                    thal_cursor.insertRow(
-                        (
-                            point,
-                            xsec_id,
-                            thalweg.get("x"),
-                            thalweg.get("y"),
-                            thalweg.get("thalweg_z"),
-                            thalweg.get("dist_ctr"),
-                            thalweg.get("thalweg_conf"),
-                            thalweg.get("thalweg_flag"),
-                        )
-                    )
+    for xsec_id, rows in sorted(grouped.items()):
+        clean = clean_profile_rows(rows)
+        nodata_count = len(rows) - len(clean)
+        if len(clean) < 3:
+            metric_insert_rows.append(
+                (xsec_id, len(clean), nodata_count, None, None, None, "too_few_points")
+            )
+            continue
+        thalweg = detect_thalweg(clean, centre_search_m)
+        if not thalweg:
+            metric_insert_rows.append(
+                (xsec_id, len(clean), nodata_count, None, None, None, "no_thalweg")
+            )
+            continue
 
-                    curve = hydraulic_curve_for_profile(
-                        clean,
-                        int(thalweg["profile_index"]),
-                        float(thalweg["thalweg_z"]),
-                        max_water_height_m,
-                        water_level_step_m,
-                        min_top_width_m,
-                    )
-                    for curve_row in curve:
-                        curve_cursor.insertRow(
-                            (
-                                xsec_id,
-                                curve_row["wl_z"],
-                                curve_row["wl_above"],
-                                curve_row["top_w_m"],
-                                curve_row["flow_area"],
-                                curve_row["hyd_depth"],
-                                curve_row["width_rate"],
-                                curve_row["area_rate"],
-                                curve_row["hyd_depth_rate"],
-                                curve_row["left_edge_wet"],
-                                curve_row["right_edge_wet"],
-                                curve_row["section_too_short"],
-                                curve_row["water_reaches_profile_edge"],
-                                curve_row["valid"],
-                            )
-                        )
+        point = arcpy.PointGeometry(
+            arcpy.Point(thalweg.get("x"), thalweg.get("y")), spatial_ref
+        )
+        thalweg_insert_rows.append(
+            (
+                point,
+                xsec_id,
+                thalweg.get("x"),
+                thalweg.get("y"),
+                thalweg.get("thalweg_z"),
+                thalweg.get("dist_ctr"),
+                thalweg.get("thalweg_conf"),
+                thalweg.get("thalweg_flag"),
+            )
+        )
 
-                    elevations = [row["elev_m"] for row in clean]
-                    metric_cursor.insertRow(
-                        (
-                            xsec_id,
-                            len(clean),
-                            nodata_count,
-                            min(elevations),
-                            max(elevations),
-                            thalweg.get("thalweg_z"),
-                            thalweg.get("thalweg_flag"),
-                        )
-                    )
+        curve = hydraulic_curve_for_profile(
+            clean,
+            int(thalweg["profile_index"]),
+            float(thalweg["thalweg_z"]),
+            max_water_height_m,
+            water_level_step_m,
+            min_top_width_m,
+        )
+        for curve_row in curve:
+            curve_insert_rows.append(
+                (
+                    xsec_id,
+                    curve_row["wl_z"],
+                    curve_row["wl_above"],
+                    curve_row["top_w_m"],
+                    curve_row["flow_area"],
+                    curve_row["hyd_depth"],
+                    curve_row["width_rate"],
+                    curve_row["area_rate"],
+                    curve_row["hyd_depth_rate"],
+                    curve_row["left_edge_wet"],
+                    curve_row["right_edge_wet"],
+                    curve_row["section_too_short"],
+                    curve_row["water_reaches_profile_edge"],
+                    curve_row["valid"],
+                )
+            )
+
+        elevations = [row["elev_m"] for row in clean]
+        metric_insert_rows.append(
+            (
+                xsec_id,
+                len(clean),
+                nodata_count,
+                min(elevations),
+                max(elevations),
+                thalweg.get("thalweg_z"),
+                thalweg.get("thalweg_flag"),
+            )
+        )
+
+    with arcpy.da.InsertCursor(output_thalweg_points, thalweg_fields) as cursor:
+        for row in thalweg_insert_rows:
+            cursor.insertRow(row)
+
+    with arcpy.da.InsertCursor(output_hydraulic_curve_table, curve_fields) as cursor:
+        for row in curve_insert_rows:
+            cursor.insertRow(row)
+
+    with arcpy.da.InsertCursor(output_profile_metrics_table, metrics_fields) as cursor:
+        for row in metric_insert_rows:
+            cursor.insertRow(row)
 
     add_message(f"Processed hydraulic metrics for {len(grouped)} cross sections.")
     return {
