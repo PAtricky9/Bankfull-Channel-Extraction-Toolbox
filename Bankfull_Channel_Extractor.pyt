@@ -5,15 +5,37 @@ from __future__ import annotations
 
 import os
 import sys
+import importlib
 
-TOOLBOX_DIR = os.path.dirname(__file__)
-if TOOLBOX_DIR not in sys.path:
-    sys.path.insert(0, TOOLBOX_DIR)
+TOOLBOX_DIR = os.path.abspath(os.path.dirname(__file__))
+
+# Put this toolbox folder first in the import search path.
+sys.path = [p for p in sys.path if os.path.abspath(p or os.getcwd()) != TOOLBOX_DIR]
+sys.path.insert(0, TOOLBOX_DIR)
+
+# ArcGIS Pro can keep Python modules cached between toolbox loads.
+# Clear stale local package modules so this copy of the toolbox imports its own bankfull_core.
+for module_name in list(sys.modules):
+    if module_name == "bankfull_core" or module_name.startswith("bankfull_core."):
+        del sys.modules[module_name]
 
 try:
     import arcpy  # type: ignore
 except Exception:  # pragma: no cover - ArcPy is available inside ArcGIS Pro.
     arcpy = None
+
+_bankfull_io_utils = importlib.import_module("bankfull_core.io_utils")
+_IO_UTILS_FILE = os.path.abspath(getattr(_bankfull_io_utils, "__file__", ""))
+try:
+    _IO_UTILS_IN_TOOLBOX = os.path.commonpath([TOOLBOX_DIR, _IO_UTILS_FILE]) == TOOLBOX_DIR
+except ValueError:
+    _IO_UTILS_IN_TOOLBOX = False
+if not _IO_UTILS_IN_TOOLBOX:
+    raise ImportError(
+        "Imported bankfull_core.io_utils from the wrong folder. "
+        f"Toolbox folder: {TOOLBOX_DIR}. "
+        f"Imported io_utils: {_IO_UTILS_FILE}."
+    )
 
 from bankfull_core.candidate_detection import detect_bankfull_candidates
 from bankfull_core.continuity_check import select_best_candidates
