@@ -13,3 +13,4 @@ This toolbox was inspired by the published workflow and documentation for:
 No source code from the Cross-Sections and Dimensions Tool repository is included in this implementation. The current implementation was written independently from the project specification, using the reference tool as methodological inspiration only.
 
 If future versions copy or adapt code from the reference repository, retain the original MIT licence notice and clearly mark the copied or adapted portions.
+

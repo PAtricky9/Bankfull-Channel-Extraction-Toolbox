@@ -69,50 +69,57 @@ def create_bankfull_polygon(
     _create_line_fc(output_right_bank_line, spatial_ref, overwrite)
     _create_polygon_fc(output_polygon, spatial_ref, overwrite)
 
-    with arcpy.da.InsertCursor(
-        output_left_bank_line, ["SHAPE@", "reach_id", "side", "pt_count", "qa_flag"]
-    ) as left_cursor:
-        with arcpy.da.InsertCursor(
-            output_right_bank_line, ["SHAPE@", "reach_id", "side", "pt_count", "qa_flag"]
-        ) as right_cursor:
-            with arcpy.da.InsertCursor(
-                output_polygon, ["SHAPE@", "reach_id", "xsec_count", "qa_flag", "qa_reason"]
-            ) as polygon_cursor:
-                for reach_id, rows in selected.items():
-                    valid_rows = [
-                        row
-                        for row in rows
-                        if row.get("left_x") is not None
-                        and row.get("left_y") is not None
-                        and row.get("right_x") is not None
-                        and row.get("right_y") is not None
-                    ]
-                    if len(valid_rows) < 2:
-                        continue
-                    left_points = [
-                        arcpy.Point(row["left_x"], row["left_y"]) for row in valid_rows
-                    ]
-                    right_points = [
-                        arcpy.Point(row["right_x"], row["right_y"]) for row in valid_rows
-                    ]
-                    left_line = arcpy.Polyline(arcpy.Array(left_points), spatial_ref)
-                    right_line = arcpy.Polyline(arcpy.Array(right_points), spatial_ref)
-                    left_cursor.insertRow((left_line, reach_id, "left", len(left_points), "ok"))
-                    right_cursor.insertRow((right_line, reach_id, "right", len(right_points), "ok"))
+    line_fields = ["SHAPE@", "reach_id", "side", "pt_count", "qa_flag"]
+    polygon_fields = ["SHAPE@", "reach_id", "xsec_count", "qa_flag", "qa_reason"]
+    left_bank_rows = []
+    right_bank_rows = []
+    polygon_rows = []
 
-                    ring_points = left_points + list(reversed(right_points)) + [left_points[0]]
-                    polygon = arcpy.Polygon(arcpy.Array(ring_points), spatial_ref)
-                    qa_flag = "ok"
-                    qa_reason = "raw polygon created"
-                    if polygon.isMultipart:
-                        qa_flag = "multipart"
-                        qa_reason = "polygon is multipart after construction; inspect geometry"
-                    if polygon.area <= 0:
-                        qa_flag = "zero_area"
-                        qa_reason = "polygon has zero or negative area; inspect bank ordering"
-                    polygon_cursor.insertRow(
-                        (polygon, reach_id, len(valid_rows), qa_flag, qa_reason)
-                    )
+    for reach_id, rows in selected.items():
+        valid_rows = [
+            row
+            for row in rows
+            if row.get("left_x") is not None
+            and row.get("left_y") is not None
+            and row.get("right_x") is not None
+            and row.get("right_y") is not None
+        ]
+        if len(valid_rows) < 2:
+            continue
+        left_points = [
+            arcpy.Point(row["left_x"], row["left_y"]) for row in valid_rows
+        ]
+        right_points = [
+            arcpy.Point(row["right_x"], row["right_y"]) for row in valid_rows
+        ]
+        left_line = arcpy.Polyline(arcpy.Array(left_points), spatial_ref)
+        right_line = arcpy.Polyline(arcpy.Array(right_points), spatial_ref)
+        left_bank_rows.append((left_line, reach_id, "left", len(left_points), "ok"))
+        right_bank_rows.append((right_line, reach_id, "right", len(right_points), "ok"))
+
+        ring_points = left_points + list(reversed(right_points)) + [left_points[0]]
+        polygon = arcpy.Polygon(arcpy.Array(ring_points), spatial_ref)
+        qa_flag = "ok"
+        qa_reason = "raw polygon created"
+        if polygon.isMultipart:
+            qa_flag = "multipart"
+            qa_reason = "polygon is multipart after construction; inspect geometry"
+        if polygon.area <= 0:
+            qa_flag = "zero_area"
+            qa_reason = "polygon has zero or negative area; inspect bank ordering"
+        polygon_rows.append((polygon, reach_id, len(valid_rows), qa_flag, qa_reason))
+
+    with arcpy.da.InsertCursor(output_left_bank_line, line_fields) as cursor:
+        for row in left_bank_rows:
+            cursor.insertRow(row)
+
+    with arcpy.da.InsertCursor(output_right_bank_line, line_fields) as cursor:
+        for row in right_bank_rows:
+            cursor.insertRow(row)
+
+    with arcpy.da.InsertCursor(output_polygon, polygon_fields) as cursor:
+        for row in polygon_rows:
+            cursor.insertRow(row)
 
     add_message(f"Created raw bankfull polygons for {len(selected)} reaches.")
     return {

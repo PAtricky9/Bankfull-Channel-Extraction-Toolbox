@@ -124,79 +124,87 @@ def smooth_bank_lines(
     _create_polygon(output_smoothed_polygon, spatial_ref, overwrite)
     _create_log(output_correction_log, overwrite)
 
-    with arcpy.da.InsertCursor(
-        output_smoothed_points,
-        [
-            "SHAPE@",
-            "xsec_id",
-            "reach_id",
-            "chain_m",
-            "side",
-            "method",
-            "orig_x",
-            "orig_y",
-            "smooth_x",
-            "smooth_y",
-            "changed",
-        ],
-    ) as point_cursor:
-        with arcpy.da.InsertCursor(
-            output_correction_log,
-            ["xsec_id", "reach_id", "chain_m", "side", "delta_x", "delta_y", "reason"],
-        ) as log_cursor:
-            for row in smoothed_rows:
-                for side in ("left", "right"):
-                    orig_x = row[f"orig_{side}_x"]
-                    orig_y = row[f"orig_{side}_y"]
-                    smooth_x = row[f"{side}_x"]
-                    smooth_y = row[f"{side}_y"]
-                    delta_x = float(smooth_x) - float(orig_x)
-                    delta_y = float(smooth_y) - float(orig_y)
-                    changed = "Yes" if abs(delta_x) > 1e-9 or abs(delta_y) > 1e-9 else "No"
-                    point = arcpy.Point(smooth_x, smooth_y)
-                    point_cursor.insertRow(
-                        (
-                            arcpy.PointGeometry(point, spatial_ref),
-                            row["xsec_id"],
-                            row["reach_id"],
-                            row["chain_m"],
-                            side,
-                            method,
-                            orig_x,
-                            orig_y,
-                            smooth_x,
-                            smooth_y,
-                            changed,
-                        )
-                    )
-                    log_cursor.insertRow(
-                        (
-                            row["xsec_id"],
-                            row["reach_id"],
-                            row["chain_m"],
-                            side,
-                            delta_x,
-                            delta_y,
-                            row["smooth_reason"],
-                        )
-                    )
+    point_fields = [
+        "SHAPE@",
+        "xsec_id",
+        "reach_id",
+        "chain_m",
+        "side",
+        "method",
+        "orig_x",
+        "orig_y",
+        "smooth_x",
+        "smooth_y",
+        "changed",
+    ]
+    log_fields = ["xsec_id", "reach_id", "chain_m", "side", "delta_x", "delta_y", "reason"]
+    polygon_fields = ["SHAPE@", "reach_id", "xsec_count", "smooth_mth"]
+    point_rows = []
+    log_rows = []
 
-    with arcpy.da.InsertCursor(
-        output_smoothed_polygon, ["SHAPE@", "reach_id", "xsec_count", "smooth_mth"]
-    ) as polygon_cursor:
-        by_reach: dict[str, list[dict]] = defaultdict(list)
-        for row in smoothed_rows:
-            by_reach[str(row["reach_id"])].append(row)
-        for reach_id, rows in by_reach.items():
-            rows.sort(key=lambda item: float(item.get("chain_m") or 0.0))
-            if len(rows) < 2:
-                continue
-            left_points = [arcpy.Point(row["left_x"], row["left_y"]) for row in rows]
-            right_points = [arcpy.Point(row["right_x"], row["right_y"]) for row in rows]
-            ring = left_points + list(reversed(right_points)) + [left_points[0]]
-            polygon_cursor.insertRow(
-                (arcpy.Polygon(arcpy.Array(ring), spatial_ref), reach_id, len(rows), method)
+    for row in smoothed_rows:
+        for side in ("left", "right"):
+            orig_x = row[f"orig_{side}_x"]
+            orig_y = row[f"orig_{side}_y"]
+            smooth_x = row[f"{side}_x"]
+            smooth_y = row[f"{side}_y"]
+            delta_x = float(smooth_x) - float(orig_x)
+            delta_y = float(smooth_y) - float(orig_y)
+            changed = "Yes" if abs(delta_x) > 1e-9 or abs(delta_y) > 1e-9 else "No"
+            point = arcpy.Point(smooth_x, smooth_y)
+            point_rows.append(
+                (
+                    arcpy.PointGeometry(point, spatial_ref),
+                    row["xsec_id"],
+                    row["reach_id"],
+                    row["chain_m"],
+                    side,
+                    method,
+                    orig_x,
+                    orig_y,
+                    smooth_x,
+                    smooth_y,
+                    changed,
+                )
             )
+            log_rows.append(
+                (
+                    row["xsec_id"],
+                    row["reach_id"],
+                    row["chain_m"],
+                    side,
+                    delta_x,
+                    delta_y,
+                    row["smooth_reason"],
+                )
+            )
+
+    by_reach: dict[str, list[dict]] = defaultdict(list)
+    for row in smoothed_rows:
+        by_reach[str(row["reach_id"])].append(row)
+    polygon_rows = []
+    for reach_id, rows in by_reach.items():
+        rows.sort(key=lambda item: float(item.get("chain_m") or 0.0))
+        if len(rows) < 2:
+            continue
+        left_points = [arcpy.Point(row["left_x"], row["left_y"]) for row in rows]
+        right_points = [arcpy.Point(row["right_x"], row["right_y"]) for row in rows]
+        ring = left_points + list(reversed(right_points)) + [left_points[0]]
+        polygon_rows.append(
+            (arcpy.Polygon(arcpy.Array(ring), spatial_ref), reach_id, len(rows), method)
+        )
+
+    with arcpy.da.InsertCursor(output_smoothed_points, point_fields) as cursor:
+        for row in point_rows:
+            cursor.insertRow(row)
+
+    with arcpy.da.InsertCursor(output_correction_log, log_fields) as cursor:
+        for row in log_rows:
+            cursor.insertRow(row)
+
+    with arcpy.da.InsertCursor(output_smoothed_polygon, polygon_fields) as cursor:
+        for row in polygon_rows:
+            cursor.insertRow(row)
 
     add_message(f"Created smoothed bankfull outputs for {len(grouped)} reaches.")
     return {

@@ -160,15 +160,13 @@ def select_best_candidates(
     for candidate in candidates:
         by_xsec[int(candidate["xsec_id"])].append(candidate)
 
-    selected = []
+    reference_rows = []
     for xsec_id, rows in by_xsec.items():
         best = max(rows, key=_base_score)
-        row = dict(best)
-        row["score"] = _base_score(best)
-        selected.append(row)
+        reference_rows.append(dict(best))
 
     by_reach: dict[str, list[dict]] = defaultdict(list)
-    for row in selected:
+    for row in reference_rows:
         by_reach[str(row.get("reach_id"))].append(row)
 
     final_rows = []
@@ -176,7 +174,7 @@ def select_best_candidates(
     half_window = max(1, window // 2)
     for reach_id, rows in by_reach.items():
         rows.sort(key=lambda item: float(item.get("chain_m") or 0.0))
-        for idx, row in enumerate(rows):
+        for idx, reference in enumerate(rows):
             lo = max(0, idx - half_window)
             hi = min(len(rows), idx + half_window + 1)
             widths = [
@@ -185,148 +183,173 @@ def select_best_candidates(
                 if item.get("bf_width") is not None
             ]
             local_med = median(widths) if widths else None
-            width_dev = None
-            if local_med and local_med > 0 and row.get("bf_width") is not None:
-                width_dev = abs(float(row["bf_width"]) - local_med) / local_med
+            scored_candidates = []
+            for candidate in by_xsec[int(reference["xsec_id"])]:
+                row = dict(candidate)
+                width_dev = None
+                if local_med and local_med > 0 and row.get("bf_width") is not None:
+                    width_dev = abs(float(row["bf_width"]) - local_med) / local_med
 
-            level_jumps = []
-            if idx > 0 and row.get("bf_level") is not None and rows[idx - 1].get("bf_level") is not None:
-                level_jumps.append(abs(float(row["bf_level"]) - float(rows[idx - 1]["bf_level"])))
-            if idx < len(rows) - 1 and row.get("bf_level") is not None and rows[idx + 1].get("bf_level") is not None:
-                level_jumps.append(abs(float(row["bf_level"]) - float(rows[idx + 1]["bf_level"])))
-            level_jump = max(level_jumps) if level_jumps else 0.0
+                level_jumps = []
+                if idx > 0 and row.get("bf_level") is not None and rows[idx - 1].get("bf_level") is not None:
+                    level_jumps.append(abs(float(row["bf_level"]) - float(rows[idx - 1]["bf_level"])))
+                if idx < len(rows) - 1 and row.get("bf_level") is not None and rows[idx + 1].get("bf_level") is not None:
+                    level_jumps.append(abs(float(row["bf_level"]) - float(rows[idx + 1]["bf_level"])))
+                level_jump = max(level_jumps) if level_jumps else 0.0
 
-            score = float(row["score"])
-            reasons = []
-            flags = []
-            if width_dev is not None and width_dev > width_jump_threshold:
-                score -= 0.2
-                flags.append("width_jump")
-                reasons.append(f"width deviation {width_dev:.2f} exceeds threshold {width_jump_threshold:g}")
-            if level_jump > elevation_jump_threshold_m:
-                score -= 0.2
-                flags.append("level_jump")
-                reasons.append(f"level jump {level_jump:.2f} m exceeds threshold {elevation_jump_threshold_m:g} m")
-            if row.get("cand_flag") not in (None, "", "ok"):
-                flags.append(str(row.get("cand_flag")))
-                reasons.append(str(row.get("reason") or row.get("cand_flag")))
-            if row.get("left_x") is None or row.get("right_x") is None:
-                score -= 0.3
-                flags.append("missing_bank")
-                reasons.append("missing left or right bank point")
+                score = _base_score(row)
+                reasons = []
+                flags = []
+                if width_dev is not None and width_dev > width_jump_threshold:
+                    score -= 0.2
+                    flags.append("width_jump")
+                    reasons.append(f"width deviation {width_dev:.2f} exceeds threshold {width_jump_threshold:g}")
+                if level_jump > elevation_jump_threshold_m:
+                    score -= 0.2
+                    flags.append("level_jump")
+                    reasons.append(f"level jump {level_jump:.2f} m exceeds threshold {elevation_jump_threshold_m:g} m")
+                if int(row.get("water_reaches_profile_edge") or 0) == 1:
+                    score -= 0.25
+                    flags.append("water_reaches_profile_edge")
+                    reasons.append("water level reaches the sampled profile edge; cross section may be too short")
+                if row.get("cand_flag") not in (None, "", "ok"):
+                    for flag in str(row.get("cand_flag")).split(";"):
+                        if flag and flag not in flags:
+                            flags.append(flag)
+                    reason = str(row.get("reason") or row.get("cand_flag"))
+                    if reason not in reasons:
+                        reasons.append(reason)
+                if row.get("left_x") is None or row.get("right_x") is None:
+                    score -= 0.3
+                    flags.append("missing_bank")
+                    reasons.append("missing left or right bank point")
 
-            score = max(0.0, min(1.0, score))
-            confidence = _confidence_label(score)
-            review_req = "Yes" if confidence == "Low" or flags else "No"
-            final = {
-                "xsec_id": row["xsec_id"],
-                "reach_id": reach_id,
-                "chain_m": row["chain_m"],
-                "sel_method": row["method"],
-                "bf_level": row["bf_level"],
-                "bf_width": row["bf_width"],
-                "confidence": confidence,
-                "review_req": review_req,
-                "qa_flag": ";".join(flags) if flags else "ok",
-                "qa_reason": "; ".join(reasons) if reasons else "selected candidate passed continuity checks",
-                "local_med": local_med,
-                "width_dev": width_dev,
-                "level_jump": level_jump,
-                "left_x": row["left_x"],
-                "left_y": row["left_y"],
-                "left_z": row["left_z"],
-                "right_x": row["right_x"],
-                "right_y": row["right_y"],
-                "right_z": row["right_z"],
-            }
-            final_rows.append(final)
+                score = max(0.0, min(1.0, score))
+                confidence = _confidence_label(score)
+                review_req = "Yes" if confidence == "Low" or flags else "No"
+                scored_candidates.append(
+                    {
+                        "_score": score,
+                        "xsec_id": row["xsec_id"],
+                        "reach_id": reach_id,
+                        "chain_m": row["chain_m"],
+                        "sel_method": row["method"],
+                        "bf_level": row["bf_level"],
+                        "bf_width": row["bf_width"],
+                        "confidence": confidence,
+                        "review_req": review_req,
+                        "qa_flag": ";".join(flags) if flags else "ok",
+                        "qa_reason": "; ".join(reasons) if reasons else "selected candidate passed continuity checks",
+                        "local_med": local_med,
+                        "width_dev": width_dev,
+                        "level_jump": level_jump,
+                        "left_x": row["left_x"],
+                        "left_y": row["left_y"],
+                        "left_z": row["left_z"],
+                        "right_x": row["right_x"],
+                        "right_y": row["right_y"],
+                        "right_z": row["right_z"],
+                    }
+                )
+            final_rows.append(max(scored_candidates, key=lambda item: item["_score"]))
 
     _create_selected_table(output_selected_table, overwrite)
     _create_selected_points(output_selected_points, spatial_ref, overwrite)
     _create_selected_lines(output_selected_width_lines, spatial_ref, overwrite)
     _create_qa_table(output_qa_flags, overwrite)
 
-    with arcpy.da.InsertCursor(output_selected_table, SELECTED_FIELDS) as table_cursor:
-        with arcpy.da.InsertCursor(
-            output_selected_points,
-            [
-                "SHAPE@",
-                "xsec_id",
-                "reach_id",
-                "chain_m",
-                "side",
-                "sel_method",
-                "bf_level",
-                "bank_z",
-                "bf_width",
-                "confidence",
-                "review_req",
-            ],
-        ) as point_cursor:
-            with arcpy.da.InsertCursor(
-                output_selected_width_lines,
-                [
-                    "SHAPE@",
-                    "xsec_id",
-                    "reach_id",
-                    "chain_m",
-                    "sel_method",
-                    "bf_level",
-                    "bf_width",
-                    "confidence",
-                    "review_req",
-                ],
-            ) as line_cursor:
-                with arcpy.da.InsertCursor(
-                    output_qa_flags,
-                    ["xsec_id", "reach_id", "chain_m", "qa_flag", "qa_reason", "review_req"],
-                ) as qa_cursor:
-                    for row in sorted(final_rows, key=lambda item: (item["reach_id"], item["chain_m"] or 0)):
-                        table_cursor.insertRow(tuple(row[field] for field in SELECTED_FIELDS))
-                        left_point = arcpy.Point(row["left_x"], row["left_y"])
-                        right_point = arcpy.Point(row["right_x"], row["right_y"])
-                        for side, point, bank_z in (
-                            ("left", left_point, row["left_z"]),
-                            ("right", right_point, row["right_z"]),
-                        ):
-                            point_cursor.insertRow(
-                                (
-                                    arcpy.PointGeometry(point, spatial_ref),
-                                    row["xsec_id"],
-                                    row["reach_id"],
-                                    row["chain_m"],
-                                    side,
-                                    row["sel_method"],
-                                    row["bf_level"],
-                                    bank_z,
-                                    row["bf_width"],
-                                    row["confidence"],
-                                    row["review_req"],
-                                )
-                            )
-                        line_cursor.insertRow(
-                            (
-                                arcpy.Polyline(arcpy.Array([left_point, right_point]), spatial_ref),
-                                row["xsec_id"],
-                                row["reach_id"],
-                                row["chain_m"],
-                                row["sel_method"],
-                                row["bf_level"],
-                                row["bf_width"],
-                                row["confidence"],
-                                row["review_req"],
-                            )
-                        )
-                        qa_cursor.insertRow(
-                            (
-                                row["xsec_id"],
-                                row["reach_id"],
-                                row["chain_m"],
-                                row["qa_flag"],
-                                row["qa_reason"],
-                                row["review_req"],
-                            )
-                        )
+    point_fields = [
+        "SHAPE@",
+        "xsec_id",
+        "reach_id",
+        "chain_m",
+        "side",
+        "sel_method",
+        "bf_level",
+        "bank_z",
+        "bf_width",
+        "confidence",
+        "review_req",
+    ]
+    line_fields = [
+        "SHAPE@",
+        "xsec_id",
+        "reach_id",
+        "chain_m",
+        "sel_method",
+        "bf_level",
+        "bf_width",
+        "confidence",
+        "review_req",
+    ]
+    qa_fields = ["xsec_id", "reach_id", "chain_m", "qa_flag", "qa_reason", "review_req"]
+    selected_table_rows = []
+    selected_point_rows = []
+    selected_line_rows = []
+    qa_rows = []
+
+    for row in sorted(final_rows, key=lambda item: (item["reach_id"], item["chain_m"] or 0)):
+        selected_table_rows.append(tuple(row[field] for field in SELECTED_FIELDS))
+        left_point = arcpy.Point(row["left_x"], row["left_y"])
+        right_point = arcpy.Point(row["right_x"], row["right_y"])
+        for side, point, bank_z in (
+            ("left", left_point, row["left_z"]),
+            ("right", right_point, row["right_z"]),
+        ):
+            selected_point_rows.append(
+                (
+                    arcpy.PointGeometry(point, spatial_ref),
+                    row["xsec_id"],
+                    row["reach_id"],
+                    row["chain_m"],
+                    side,
+                    row["sel_method"],
+                    row["bf_level"],
+                    bank_z,
+                    row["bf_width"],
+                    row["confidence"],
+                    row["review_req"],
+                )
+            )
+        selected_line_rows.append(
+            (
+                arcpy.Polyline(arcpy.Array([left_point, right_point]), spatial_ref),
+                row["xsec_id"],
+                row["reach_id"],
+                row["chain_m"],
+                row["sel_method"],
+                row["bf_level"],
+                row["bf_width"],
+                row["confidence"],
+                row["review_req"],
+            )
+        )
+        qa_rows.append(
+            (
+                row["xsec_id"],
+                row["reach_id"],
+                row["chain_m"],
+                row["qa_flag"],
+                row["qa_reason"],
+                row["review_req"],
+            )
+        )
+
+    with arcpy.da.InsertCursor(output_selected_table, SELECTED_FIELDS) as cursor:
+        for row in selected_table_rows:
+            cursor.insertRow(row)
+
+    with arcpy.da.InsertCursor(output_selected_points, point_fields) as cursor:
+        for row in selected_point_rows:
+            cursor.insertRow(row)
+
+    with arcpy.da.InsertCursor(output_selected_width_lines, line_fields) as cursor:
+        for row in selected_line_rows:
+            cursor.insertRow(row)
+
+    with arcpy.da.InsertCursor(output_qa_flags, qa_fields) as cursor:
+        for row in qa_rows:
+            cursor.insertRow(row)
 
     add_message(f"Selected final bankfull candidates for {len(final_rows)} cross sections.")
     return {

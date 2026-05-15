@@ -50,3 +50,4 @@ This is a starting point for testing a short reach. Adjust values after inspecti
 - Smoothing method: `none` for first QA pass.
 - Smoothing window size: `5`
 - Preserve low confidence points: `True`
+

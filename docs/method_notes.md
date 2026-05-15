@@ -87,3 +87,9 @@ Review outputs in this order:
 8. Smoothed polygon and correction log, if smoothing is used.
 
 Prioritise review near bridges, culverts, roads, levees, confluences, tight meanders, low-gradient reaches, vegetation artefacts, and cross sections with large width or level jumps.
+
+## Validation Status
+
+This toolbox has not yet been validated against surveyed bankfull indicators or field verified channel boundaries. Outputs should be treated as candidate bankfull extents until reviewed by a geomorphologist or experienced hydraulic or GIS analyst.
+
+The current method notes describe the intended calculation logic and QA workflow. They do not replace ArcGIS Pro runtime testing, field validation, or independent geomorphic review.
